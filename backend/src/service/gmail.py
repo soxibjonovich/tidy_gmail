@@ -15,6 +15,8 @@ async def get_all_emails(access_token: str, q: str | None = None):
                 "Authorization": f"Bearer {access_token}"
             }
         )
+        print(response.status_code)
+        print(response.content)
         return schemas.GetMessagesRaw.model_validate(response.json())
 
 # FIXME: implementing new function for dispose of some sensitive information from messages' json

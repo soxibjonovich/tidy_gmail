@@ -12,7 +12,7 @@ class MessageInfo(BaseModel):
     
 class GetMessagesRaw(BaseModel):
     messages: list[MessageInfo]
-    nextPageToken: str
+    nextPageToken: str | None
     resultSizeEstimate: int | str | None
 
 class GoogleSignInResponse(BaseModel):
@@ -38,7 +38,7 @@ class UserJWTInfo(BaseModel):
     exp: int
 
 class HeaderItem(BaseModel):
-    name: Literal["List-Unsubscribe", "List-Unsubscribe-Post", "To", "From", "Date"] | str
+    name: str
     value: str
 
 class Payload(BaseModel):
