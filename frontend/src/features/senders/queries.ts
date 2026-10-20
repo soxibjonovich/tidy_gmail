@@ -23,9 +23,22 @@ export const sendersKey = ["gmail", "senders"] as const
 
 const apiBaseUrl: string | undefined = import.meta.env.VITE_API_URL
 
+// Safety net: backend aggregates ~100 messages (a serial regression ~50s).
+// Past this, fail into the error card with Retry instead of a stuck skeleton.
+const SENDERS_TIMEOUT_MS = 60_000
+
 function appAuthHeader(): Record<string, string> {
   const appToken = getAppToken()
   return appToken ? { Authorization: `Bearer ${appToken}` } : {}
+}
+
+async function toApiError(res: Response): Promise<ApiError> {
+  const body: unknown = await res.json().catch(() => null)
+  const detail = (body as { detail?: unknown } | null)?.detail
+  return new ApiError(
+    typeof detail === "string" ? detail : res.statusText || `HTTP ${res.status}`,
+    res.status,
+  )
 }
 
 export function useSenders() {
@@ -38,13 +51,27 @@ export function useSenders() {
       const url = new URL(`${apiBaseUrl}/gmail/senders`)
       const token = getAccessToken()
       if (token) url.searchParams.set("access_token", token)
-      const res = await fetch(url, {
-        credentials: "include",
-        signal,
-        headers: appAuthHeader(),
-      })
+      let res: Response
+      try {
+        res = await fetch(url, {
+          credentials: "include",
+          signal: AbortSignal.any([
+            signal,
+            AbortSignal.timeout(SENDERS_TIMEOUT_MS),
+          ]),
+          headers: appAuthHeader(),
+        })
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "TimeoutError") {
+          throw new ApiError(
+            `Scan timed out after ${SENDERS_TIMEOUT_MS / 1000}s — the backend did not answer. Retry, or check its logs.`,
+            504,
+          )
+        }
+        throw e
+      }
       if (!res.ok) {
-        throw new ApiError(res.statusText || `HTTP ${res.status}`, res.status)
+        throw await toApiError(res)
       }
       const json: unknown = await res.json()
       return Array.isArray(json) ? (json as Sender[]) : []

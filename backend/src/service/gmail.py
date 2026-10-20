@@ -136,14 +136,37 @@ def _is_one_click(value: str | None) -> bool:
     return value is not None and "one-click" in value.lower()
 
 
+_SENDERS_CONCURRENCY = 20  # Gmail quota: 250 units/s, messages.get = 5 units
+
+
 async def get_senders(access_token: str) -> list[schemas.GmailSender]:
-    """Aggregate inbox senders. N+1 fetches (like /messages) — bound by max_results."""
+    """Aggregate inbox senders. Metadata headers are fetched with bounded
+    concurrency — a serial pass over 100 messages took ~50s and made the UI
+    look hung."""
     ids = await get_all_emails(access_token, max_results=100)
+    semaphore = asyncio.Semaphore(_SENDERS_CONCURRENCY)
+
+    async def fetch(
+        message_ref: schemas.GmailMessageRef,
+    ) -> schemas.GmailMessage | BaseException:
+        async with semaphore:
+            try:
+                return await get_email(
+                    message_ref.id,
+                    access_token,
+                    metadata_headers=_UNSUBSCRIBE_HEADERS,
+                )
+            except Exception as exc:  # one bad message must not sink the scan
+                return exc
+
+    results = await asyncio.gather(*(fetch(ref) for ref in ids.messages))
+    messages = [r for r in results if isinstance(r, schemas.GmailMessage)]
+    failures = [r for r in results if isinstance(r, BaseException)]
+    if not messages and failures:
+        raise failures[0]
+
     aggregated: dict[str, schemas.GmailSender] = {}
-    for message_ref in ids.messages:
-        message = await get_email(
-            message_ref.id, access_token, metadata_headers=_UNSUBSCRIBE_HEADERS
-        )
+    for message in messages:
         headers = message.payload.headers
         from_raw = _header_value(headers, "From")
         if not from_raw:

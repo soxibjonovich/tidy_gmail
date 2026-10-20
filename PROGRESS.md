@@ -88,3 +88,18 @@ Nits:
 ## Next milestone (unchanged)
 
 Unsubscribe flow + sender aggregation; blocked-by: DB bootable + pagination above.
+
+## Done — 2026-10-20
+
+- `/gmail/senders` "doesn't work" diagnosed in two parts: (a) bare URL without
+  `Authorization: Bearer <app JWT>` → 401 from `deps.py` gate (by design — the UI
+  sends the header and gets 200); (b) the UI request took **49s** (100 serial
+  `get_email` calls) → skeleton looked hung.
+- `service/gmail.py` `get_senders`: metadata fetches now run under a 20-wide
+  `asyncio.Semaphore` (failed rows skipped; first error raised if none succeed).
+  Same 23 senders, **49s → ~3s**. Aggregation/parse logic untouched.
+- Frontend `features/senders/queries.ts`: 60s abort timeout → clear 504 error
+  card with Retry instead of an infinite skeleton; API error bodies now surface
+  `{"detail": ...}` instead of bare `statusText`. `typecheck && lint && build` green.
+- Still open: `/gmail/messages` keeps serial N+1 (maxResults=10); senders scan
+  capped at 100 messages, no `pageToken` pagination.
